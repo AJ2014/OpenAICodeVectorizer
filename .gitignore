@@ -1,0 +1,54 @@
+# === 操作系统 ===
+.DS_Store
+Thumbs.db
+ehthumbs.db
+desktop.ini
+
+# === Python 缓存 ===
+__pycache__/
+*.py[cod]
+*$py.class
+
+# === 虚拟环境 ===
+venv/
+env/
+.venv/
+.env/
+Pipfile.lock
+
+# === IDE 配置 ===
+.vscode/
+.idea/
+*.sublime-project
+*.sublime-workspace
+
+# === 日志和数据库 ===
+*.log
+*.sqlite3
+
+# === Jupyter Notebooks checkpoints ===
+.ipynb_checkpoints/
+
+# === 环境变量配置 ===
+.env
+*.env
+
+# === 编译生成文件 ===
+build/
+dist/
+*.egg-info/
+*.egg
+
+# === Git 忽略自身 ===
+.git/
+
+# === 压缩包 ===
+*.zip
+*.tar.gz
+*.rar
+
+# === 临时文件 ===
+*.swp
+*.bak
+*.tmp
+*.orig
