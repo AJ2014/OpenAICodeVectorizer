@@ -35,10 +35,11 @@ class RAGService:
             for j, doc_content in enumerate(docs):
                 metadata = retrieved_results['metadatas'][i][j]
                 file_path = metadata.get('source', '未知文件')
+                print(f"相关代码片段来自 '{file_path}'")
                 context_parts.append(f"相关代码片段来自 '{file_path}':\n```\n{doc_content}\n```")
         
         context_str = "\n\n".join(context_parts)
-        print(f"检索到的上下文摘要:\n{context_str[:1000]}...") # 打印部分上下文用于调试
+        # print(f"检索到的上下文摘要:\n{context_str[:1000]}...") # 打印部分上下文用于调试
 
         # 2. 构建提示 (Prompt)
         prompt = f"""
