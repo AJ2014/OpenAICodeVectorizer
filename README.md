@@ -54,10 +54,15 @@ OpenAICodeVectorizer/
 
 4.  **配置API密钥和模型**
     打开 `config.yaml` 文件，进行如下配置：
-    *   `openai_api_key`: 填入您从OpenAI或火山引擎等第三方获取的API密钥。
-    *   `volcano_engine_base_url`: 填入火山引擎或您使用的第三方OpenAI兼容服务的API基础URL (例如: `https://ark.cn-beijing.volces.com/api/v3`)。
-    *   `embedding_model`: 更改为您想使用的文本嵌入模型名称 (应为火山引擎或第三方服务提供的兼容OpenAI接口的模型名)。
-    *   `llm_model`: 更改为您想使用的聊天模型名称 (应为火山引擎或第三方服务提供的兼容OpenAI接口的模型名)。
+    *   `openai_api_key`: 填入您从服务提供商（如OpenAI、火山引擎等）获取的API密钥。
+    *   `embedding_api_type`: 指定使用的嵌入API类型，例如 `'openai'` 或 `'volcano'`。这将决定使用哪个API基准URL（`openai_api_base` 或 `volcano_engine_base_url`）。
+    *   `volcano_engine_base_url`: (当 `embedding_api_type` 为 `'volcano'` 时使用) 火山引擎或兼容服务的API基础URL (例如: `https://ark.cn-beijing.volces.com/api/v3`)。
+    *   `openai_api_base`: (可选, 当 `embedding_api_type` 为 `'openai'` 时使用) 标准OpenAI API的备用基础URL，例如用于代理或Azure OpenAI。
+    *   `embedding_model`: 更改为您想使用的文本嵌入模型名称。
+    *   `llm_model`: 更改为您想使用的聊天模型名称。
+    *   `embedding_strategy`: (可选) 处理长文本的策略。默认为 `'chunking'`（将长文本分割成块进行嵌入）。可选值为 `'direct'`（直接嵌入整个文本，如果超过模型限制可能会失败）。后续可能支持更多策略。
+    *   `max_tokens_per_chunk`: (可选, 仅当 `embedding_strategy` 为 `'chunking'` 时有效) 每个文本块的最大token数量。应设置为小于或等于嵌入模型支持的最大序列长度。默认 `4000`。
+    *   `chunk_overlap_ratio`: (可选, 仅当 `embedding_strategy` 为 `'chunking'` 时有效) 相邻文本块之间的重叠比例（token数）。例如 `0.1` 表示10%的重叠。默认 `0.1`。
     *   `chroma_db_path`: (可选) Chroma向量数据库的持久化存储路径（相对路径或绝对路径）。默认为 `./chroma_db`。
     *   `collection_name`: (可选) ChromaDB中的集合名称。
     *   `source_file_extensions`: (可选) 指定在索引时应包含的文件扩展名列表。
@@ -128,4 +133,6 @@ python main.py visualize --chroma_db_path "./chroma_db" --collection_name "code_
 # Version: 1.0
 # Updated: 2025-05-12 14:51:59
 # Version: 1.1
-# Updated: 2025-05-12 16:50:46 
+# Updated: 2025-05-12 16:50:46
+# Version: 1.2
+# Updated: 2025-05-13 11:00:00 
