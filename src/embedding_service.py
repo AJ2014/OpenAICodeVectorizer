@@ -338,13 +338,18 @@ class EmbeddingService:
         print("--- 索引完成 ---")
 
 
-    def query_vector_db(self, query_text, n_results=5):
-        """查询向量数据库以获取相关代码片段"""
-        results = self.collection.query(
-            query_texts=[query_text],
-            n_results=n_results,
-            include=["documents", "metadatas"]
-        )
+    def query_vector_db(self, query_text, n_results=5, filters: dict = None):
+        """查询向量数据库以获取相关代码片段，支持基于元数据的过滤。"""
+        query_params = {
+            "query_texts": [query_text],
+            "n_results": n_results,
+            "include": ["documents", "metadatas"]
+        }
+        if filters:
+            query_params["where"] = filters
+            print(f"使用元数据过滤器进行查询: {filters}") # 添加日志
+        
+        results = self.collection.query(**query_params)
         return results
 
 # Version: 1.1

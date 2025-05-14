@@ -2,15 +2,18 @@ import unittest
 import os
 import shutil
 import re
+from unittest.mock import MagicMock
 from src.tool_manager import (
     ListDirectoryTool,
     ReadFileContentTool,
+    QueryVectorDBTool,
     ToolPathNotFoundError,
     ToolPathIsNotDirectoryError,
     ToolPathIsNotFileError,
     ToolInvalidArgumentError,
     ToolExecutionError # Assuming this might be raised for very generic OS errors if not caught by others
 )
+from src.embedding_service import EmbeddingService
 
 class TestToolManager(unittest.TestCase):
 
@@ -66,6 +69,10 @@ class TestToolManager(unittest.TestCase):
         """每个测试方法执行前调用"""
         self.list_dir_tool = ListDirectoryTool()
         self.read_file_tool = ReadFileContentTool()
+        
+        # Mock EmbeddingService
+        self.mock_embedding_service = MagicMock(spec=EmbeddingService)
+        self.query_db_tool = QueryVectorDBTool(embedding_service=self.mock_embedding_service)
 
     # --- ListDirectoryTool Tests ---
     def test_list_directory_success(self):
@@ -153,6 +160,84 @@ class TestToolManager(unittest.TestCase):
     #             self.read_file_tool.run(self.unreadable_file_path)
     #     else:
     #         self.skipTest("无法创建不可读文件以进行测试 (可能由于权限或OS限制)。")
+
+    # --- QueryVectorDBTool Tests ---
+    def test_query_vector_db_tool_init_type_error(self):
+        """测试 QueryVectorDBTool 初始化时传入非 EmbeddingService 实例是否抛出 TypeError"""
+        with self.assertRaises(TypeError):
+            QueryVectorDBTool(embedding_service="not_an_embedding_service")
+
+    def test_query_vector_db_success(self):
+        """测试 QueryVectorDBTool 成功执行查询"""
+        mock_return_value = {"documents": [["doc1"]], "metadatas": [[{"source": "file.py"}]], "ids": [["id1"]]}
+        self.mock_embedding_service.query_vector_db.return_value = mock_return_value
+        
+        query_text = "test query"
+        n_results = 3
+        
+        result = self.query_db_tool.run(query_text=query_text, n_results=n_results)
+        
+        self.mock_embedding_service.query_vector_db.assert_called_once_with(
+            query_text=query_text,
+            n_results=n_results,
+            filters=None
+        )
+        self.assertEqual(result, mock_return_value)
+
+    def test_query_vector_db_success_with_filters(self):
+        """测试 QueryVectorDBTool 成功执行带过滤器的查询"""
+        mock_return_value = {"documents": [["doc2"]], "metadatas": [[{"source": "another.py"}]], "ids": [["id2"]]}
+        self.mock_embedding_service.query_vector_db.return_value = mock_return_value
+        
+        query_text = "another query"
+        n_results = 7
+        filters = {"source": "path/to/file.py"}
+        
+        result = self.query_db_tool.run(query_text=query_text, n_results=n_results, filters=filters)
+        
+        self.mock_embedding_service.query_vector_db.assert_called_once_with(
+            query_text=query_text,
+            n_results=n_results,
+            filters=filters
+        )
+        self.assertEqual(result, mock_return_value)
+
+    def test_query_vector_db_invalid_query_text(self):
+        """测试 QueryVectorDBTool 使用无效的 query_text"""
+        with self.assertRaises(ToolInvalidArgumentError):
+            self.query_db_tool.run(query_text="")
+        with self.assertRaises(ToolInvalidArgumentError):
+            self.query_db_tool.run(query_text="   ")
+        with self.assertRaises(ToolInvalidArgumentError):
+            self.query_db_tool.run(query_text=123) # type: ignore 
+
+    def test_query_vector_db_invalid_n_results(self):
+        """测试 QueryVectorDBTool 使用无效的 n_results"""
+        with self.assertRaises(ToolInvalidArgumentError):
+            self.query_db_tool.run(query_text="test", n_results=0)
+        with self.assertRaises(ToolInvalidArgumentError):
+            self.query_db_tool.run(query_text="test", n_results=-1)
+        with self.assertRaises(ToolInvalidArgumentError):
+            self.query_db_tool.run(query_text="test", n_results="abc") # type: ignore
+
+    def test_query_vector_db_invalid_filters_type(self):
+        """测试 QueryVectorDBTool 使用无效类型的 filters"""
+        with self.assertRaises(ToolInvalidArgumentError):
+            self.query_db_tool.run(query_text="test", filters="not_a_dict") # type: ignore
+        with self.assertRaises(ToolInvalidArgumentError):
+            self.query_db_tool.run(query_text="test", filters=[{"key":"value"}]) # type: ignore
+
+    def test_query_vector_db_execution_error_from_service(self):
+        """测试当 EmbeddingService 抛出异常时，QueryVectorDBTool 是否抛出 ToolExecutionError"""
+        original_exception = ValueError("ChromaDB connection failed")
+        self.mock_embedding_service.query_vector_db.side_effect = original_exception
+        
+        with self.assertRaises(ToolExecutionError) as cm:
+            self.query_db_tool.run(query_text="test query")
+        
+        # 检查原始异常是否被包装
+        self.assertIs(cm.exception.original_exception, original_exception)
+        self.assertEqual(cm.exception.tool_name, self.query_db_tool.name)
 
 if __name__ == '__main__':
     unittest.main() 

@@ -1,5 +1,6 @@
 import os
 import abc
+from .embedding_service import EmbeddingService
 
 # --- Custom Tool Exceptions ---
 class ToolError(Exception):
@@ -153,6 +154,68 @@ class ReadFileContentTool(Tool):
             raise ToolExecutionError(tool_name=self.name, original_exception=e, message=f"读取文件 '{file_path}' 时发生错误。")
         except Exception as e: # Catch-all for truly unexpected issues during file read
             raise ToolExecutionError(tool_name=self.name, original_exception=e)
+
+class QueryVectorDBTool(Tool):
+    """查询向量数据库以检索与查询文本相关的代码片段，支持元数据过滤。"""
+    name: str = "query_vector_db"
+    description: str = (
+        "根据查询文本从向量数据库中检索最相关的代码块。"
+        "参数: query_text (str, 必需), n_results (int, 可选, 默认5), "
+        "filters (dict, 可选, 例如 {\'source\': \'path/to/file.py\'}). " # Escaped for literal_eval
+        "filters 中的键应对应索引时存储的元数据字段。"
+    )
+
+    def __init__(self, embedding_service: EmbeddingService):
+        if not isinstance(embedding_service, EmbeddingService):
+            # 这更像是一个编程错误，而不是用户通过LLM调用工具时会遇到的错误
+            # 所以使用标准的TypeError可能更合适
+            raise TypeError("QueryVectorDBTool 需要一个 EmbeddingService 的实例。")
+        self.embedding_service = embedding_service
+
+    def run(self, query_text: str, n_results: int = 5, filters: dict = None) -> dict:
+        """
+        执行向量数据库查询。
+        参数:
+            query_text (str): 用于查询的文本。
+            n_results (int): 要返回的结果数量，默认为5。
+            filters (dict, 可选): 用于过滤结果的元数据字典。
+                                 例如: {"source": "src/utils.py"}
+        返回:
+            dict: ChromaDB 查询结果，通常包含 'documents', 'metadatas', 'ids'。
+        抛出:
+            ToolInvalidArgumentError: 如果参数无效。
+            ToolExecutionError: 如果在查询过程中发生错误。
+        """
+        if not isinstance(query_text, str) or not query_text.strip():
+            raise ToolInvalidArgumentError("query_text", query_text, "必须是一个非空字符串。")
+        
+        if not isinstance(n_results, int) or n_results <= 0:
+            raise ToolInvalidArgumentError("n_results", n_results, "必须是一个正整数。")
+
+        if filters is not None and not isinstance(filters, dict):
+            # 进一步检查 filters 的内容是否符合预期 (例如，键是字符串)
+            # 但由于ChromaDB的where子句比较灵活，这里仅做基本类型检查
+            raise ToolInvalidArgumentError("filters", filters, "必须是一个字典或None。")
+
+        try:
+            results = self.embedding_service.query_vector_db(
+                query_text=query_text,
+                n_results=n_results,
+                filters=filters
+            )
+            # 当前返回原始ChromaDB结果。如果需要，后续可以转换为更简洁的格式。
+            # 例如，将文档和元数据配对：
+            # simplified_results = []
+            # if results and results.get('documents') and results.get('metadatas'):
+            #     # Assuming query_texts was a single string, so documents[0] and metadatas[0]
+            #     docs = results['documents'][0]
+            #     metas = results['metadatas'][0]
+            #     for doc, meta in zip(docs, metas):
+            #         simplified_results.append({"document": doc, "metadata": meta})
+            # return simplified_results
+            return results 
+        except Exception as e:
+            raise ToolExecutionError(tool_name=self.name, original_exception=e, message=f"查询向量数据库时出错: {str(e)}")
 
 # Example usage (for testing, Orchestrator would use this differently)
 # if __name__ == '__main__':

@@ -34,41 +34,50 @@ class PromptEngine:
         返回:
             str: 构建好的完整提示字符串。
         """
-        
-        # 基础系统角色定义
+        prompt_parts = []
+
+        # 1. System Persona / Role
         system_persona = "您是一个AI编程助手。请根据提供的上下文信息和可用工具，尽力回答用户的问题。"
-        
-        # 工具描述
+        prompt_parts.append(system_persona)
+
+        # 2. Tool Descriptions
         tool_descriptions = self._get_tool_descriptions()
-
-        # 构建对话历史部分 (简化版)
-        history_str = ""
-        if chat_history:
-            history_parts = ["对话历史:"]
-            for entry in chat_history:
-                history_parts.append(f"{entry['role']}: {entry['content']}")
-            history_str = "\n".join(history_parts) + "\n\n"
-
-        # 构建上下文部分
-        context_section = ""
-        if context_str:
-            context_section = f"相关上下文信息:\n{context_str}\n\n"
+        prompt_parts.append(tool_descriptions)
         
-        # 核心指令和问题
-        prompt = f"""
-{system_persona}
+        # Note: Action instruction moved after user question for clarity in final prompt structure.
 
-{tool_descriptions}
+        # 3. Chat History
+        if chat_history:
+            history_section_parts = ["对话历史:"]
+            for entry in chat_history:
+                # Ensure content is a string, as tool results might be other types initially
+                content = str(entry['content']) if not isinstance(entry['content'], str) else entry['content']
+                history_section_parts.append(f"{entry['role']}: {content}")
+            prompt_parts.append("\n".join(history_section_parts))
 
-{history_str}{context_section}用户问题: {user_question}
+        # 4. Context (if any)
+        # Orchestrator currently clears context_str after the first tool use, 
+        # as tool results are then fed back via chat_history.
+        if context_str:
+            context_section_str = f"相关上下文信息:\n{context_str}"
+            prompt_parts.append(context_section_str)
+        
+        # 5. User Question
+        prompt_parts.append(f"用户当前问题: {user_question}")
+        
+        # 6. Action Instruction (Placed after the question to guide LLM's response structure)
+        action_instruction = (
+            "请分析以上信息。如果需要使用工具来获取额外信息或执行操作，"
+            "请明确指出工具名称和所需参数，格式为：\n"
+            "ACTION: tool_name(param1=value1, param2=value2)\n\n"
+            "如果可以直接回答，请给出您的答案。"
+        )
+        prompt_parts.append(action_instruction)
 
-请分析以上信息。如果需要使用工具来获取额外信息或执行操作，请明确指出工具名称和所需参数，格式为：
-ACTION: tool_name(param1=value1, param2=value2)
-
-如果可以直接回答，请给出您的答案。
-回答:
-"""
-        return prompt.strip()
+        # 7. Answer Placeholder
+        prompt_parts.append("回答:")
+        
+        return "\n\n".join(filter(None, prompt_parts)).strip() # filter(None, ...) to remove empty sections if any
 
 # 示例 (后续会由Orchestrator使用)
 # if __name__ == '__main__':
@@ -78,21 +87,22 @@ ACTION: tool_name(param1=value1, param2=value2)
 #     engine = PromptEngine(tools=[list_tool, read_tool])
 #     
 #     # 简单问答
-#     # prompt1 = engine.build_prompt(user_question="你好吗？")
-#     # print("--- Prompt 1 (无上下文) ---")
-#     # print(prompt1)
+#     prompt1 = engine.build_prompt(user_question="你好吗？")
+#     print("--- Prompt 1 (无上下文) ---")
+#     print(prompt1)
 
 #     # 带上下文的问答
-#     # context = "代码片段A显示了如何初始化一个类。\n代码片段B讨论了错误处理。"
-#     # prompt2 = engine.build_prompt(user_question="如何处理初始化时的错误？", context_str=context)
-#     # print("\n--- Prompt 2 (有上下文) ---")
-#     # print(prompt2)
+#     context = "代码片段A显示了如何初始化一个类。\n代码片段B讨论了错误处理。"
+#     prompt2 = engine.build_prompt(user_question="如何处理初始化时的错误？", context_str=context)
+#     print("\n--- Prompt 2 (有上下文) ---")
+#     print(prompt2)
 
 #     # 带历史和上下文
 #     history = [
 #         {"role": "user", "content": "什么是Python中的类？"},
-#         {"role": "assistant", "content": "类是创建对象的蓝图。"}
+#         {"role": "assistant", "content": "类是创建对象的蓝图。"},
+#         {"role": "user", "content": "Tool list_directory execution result: ['file1.py', 'file2.txt']"} # Example tool result in history
 #     ]
-#     # prompt3 = engine.build_prompt(user_question="如何实例化一个类？", context_str=context, chat_history=history)
-#     # print("\n--- Prompt 3 (有历史和上下文) ---")
-#     # print(prompt3) 
+#     prompt3 = engine.build_prompt(user_question="读取 file1.py 的内容", context_str=None, chat_history=history)
+#     print("\n--- Prompt 3 (有历史和上下文, 无初始上下文) ---")
+#     print(prompt3) 
