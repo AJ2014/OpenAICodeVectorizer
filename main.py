@@ -4,6 +4,9 @@ from src.embedding_service import EmbeddingService
 from src.rag_service import RAGService
 from src.utils import load_config
 from src.visualize import visualize_chroma_vectors
+from src.orchestrator import Orchestrator
+from src.prompt_engine import PromptEngine
+from src.tool_manager import ListDirectoryTool, ReadFileContentTool, QueryVectorDBTool
 
 # 更新时间：2025-05-12 14:51:59
 # Version: 1.0
@@ -20,7 +23,8 @@ def main():
     # 问答命令
     ask_parser = subparsers.add_parser("ask", help="就已索引的代码库提问")
     ask_parser.add_argument("question", type=str, help="您的问题")
-    ask_parser.add_argument("--n_results", type=int, default=3, help="检索时返回的相关上下文片段数量")
+    ask_parser.add_argument("--n_results", type=int, default=3, help="检索时返回的相关上下文片段数量 (RAGService直接调用时生效)")
+    ask_parser.add_argument("--use-orchestrator", action="store_true", help="使用 Orchestrator 而不是直接的 RAGService 进行问答")
 
     # 可视化命令
     vis_parser = subparsers.add_parser("visualize", help="可视化chroma向量数据库为散点图")
@@ -58,13 +62,48 @@ def main():
             print(f"执行索引操作时发生严重错误: {e}")
 
     elif args.command == "ask":
-        try:
-            rag_service = RAGService()
-            answer = rag_service.answer_question(args.question, n_results_for_context=args.n_results)
-            print("\n回答:")
-            print(answer)
-        except Exception as e:
-            print(f"执行问答操作时发生严重错误: {e}")
+        if args.use_orchestrator:
+            try:
+                print(f"正在使用 Orchestrator 回答问题: \"{args.question}\"")
+                # 1. 初始化 RAGService (Orchestrator 可能需要它)
+                rag_service = RAGService()
+
+                # 2. 初始化 EmbeddingService (QueryVectorDBTool 需要它)
+                # 注意: EmbeddingService 会尝试从配置文件加载其设置
+                embedding_service = EmbeddingService()
+                
+                # 3. 初始化工具
+                list_tool = ListDirectoryTool()
+                read_tool = ReadFileContentTool()
+                query_db_tool = QueryVectorDBTool(embedding_service=embedding_service)
+                available_tools = [list_tool, read_tool, query_db_tool]
+
+                # 4. 初始化 PromptEngine
+                prompt_engine = PromptEngine(tools=available_tools)
+
+                # 5. 初始化 Orchestrator
+                # Orchestrator 会使用内部配置或默认值来创建 OpenAI 客户端，
+                # 并管理 LLM 模型、最大迭代次数等。
+                orchestrator_instance = Orchestrator(
+                    tools=available_tools,
+                    prompt_engine=prompt_engine,
+                    rag_service=rag_service
+                )
+                
+                answer = orchestrator_instance.process_query(args.question)
+                print("\nOrchestrator 回答:")
+                print(answer)
+            except Exception as e:
+                print(f"使用 Orchestrator 执行问答操作时发生严重错误: {e}")
+        else: # 默认使用 RAGService
+            try:
+                print(f"正在使用 RAGService 直接回答问题: \"{args.question}\"")
+                rag_service = RAGService()
+                answer = rag_service.answer_question(args.question, n_results_for_context=args.n_results)
+                print("\nRAGService 回答:")
+                print(answer)
+            except Exception as e:
+                print(f"使用 RAGService 执行问答操作时发生严重错误: {e}")
 
     elif args.command == "visualize":
         try:

@@ -7,6 +7,7 @@ import os # Added for __main__ example
 from .utils import load_config
 from .prompt_engine import PromptEngine
 from .tool_manager import Tool, ToolError, ToolPathNotFoundError, ToolInvalidArgumentError, ToolExecutionError
+from .rag_service import RAGService
 
 class Orchestrator:
     """负责协调LLM、工具和提示引擎以完成复杂任务。"""
@@ -15,6 +16,7 @@ class Orchestrator:
                  tools: List[Tool], 
                  prompt_engine: PromptEngine, 
                  client: Optional[OpenAI] = None, # Added client parameter for DI
+                 rag_service: Optional[RAGService] = None, # <--- ADDED RAGSERVICE PARAM
                  max_iterations: int = 5):
         """
         初始化 Orchestrator。
@@ -22,6 +24,7 @@ class Orchestrator:
             tools (List[Tool]): 可用工具的列表。
             prompt_engine (PromptEngine): 用于构建提示的 PromptEngine 实例。
             client (Optional[OpenAI]): 一个可选的 OpenAI 客户端实例。如果提供，则使用此实例；否则，内部创建。
+            rag_service (Optional[RAGService]): 一个可选的 RAGService 实例，用于获取初步答案。
             max_iterations (int): 在单个查询中允许的最大LLM调用和工具执行迭代次数。
         """
         self.config = load_config()
@@ -37,6 +40,7 @@ class Orchestrator:
             
         self.tools = {tool.name: tool for tool in tools} # Store tools in a dict for easy lookup
         self.prompt_engine = prompt_engine
+        self.rag_service = rag_service  # <--- STORE RAGSERVICE
         self.max_iterations = max_iterations
         self.llm_model = self.config.get('llm_model', 'gpt-3.5-turbo') # Default LLM model
         # Allow model override from config for flexibility e.g. gpt-4
@@ -117,14 +121,50 @@ class Orchestrator:
         # as prompt_engine.build_prompt incorporates it into the first complex prompt.
         # However, for tracking the conversation flow, we might consider adding it to an internal log.
 
+        # --- 调用 RAGService 获取初步答案 (如果可用) ---
+        if self.rag_service:
+            print(f"Orchestrator: 调用 RAGService 为问题提供初步上下文: '{user_question}'")
+            rag_n_results = self.config.get('rag_initial_context_results', 3)
+            try:
+                rag_answer = self.rag_service.answer_question(user_question, n_results_for_context=rag_n_results)
+                print(f"Orchestrator: RAGService 返回的初步答案 (前300字符): {rag_answer[:300]}...")
+                # 将RAG的答案整合到初始上下文中，供PromptEngine使用
+                # 如果已有initial_context，则附加；否则，以此为基础。
+                rag_context_prefix = (
+                    "一个初步的RAG（检索增强生成）系统尝试回答了这个问题。 "
+                    "请回顾以下初步答案。如果它看起来准确且完整，您可以直接使用或优化它作为您的最终回复。"
+                    "如果初步答案不充分或不正确，请利用您的工具来收集更多信息并形成一个全面准确的最终答案。\n\n"
+                    "初步RAG答案：\n---\n"
+                )
+                rag_context_suffix = "\n---\n"
+                formatted_rag_answer = f"{rag_context_prefix}{rag_answer}{rag_context_suffix}"
+                
+                if current_context: # 如果用户也提供了 initial_context
+                    current_context = f"{formatted_rag_answer}\n\n明确提供的初始上下文:\n{current_context}"
+                else:
+                    current_context = formatted_rag_answer
+            except Exception as e:
+                print(f"Orchestrator: 调用 RAGService 时出错: {e}")
+                # 可以选择将错误信息也加入 current_context，或者仅记录并继续
+                error_message = f"尝试从RAG服务获取初步答案时发生错误: {e}。将不使用RAG的输出继续处理。"
+                if current_context:
+                    current_context += f"\n\n注意: {error_message}"
+                else:
+                    current_context = f"注意: {error_message}"
+        # --- RAGService 调用结束 ---
+        
         for iteration in range(self.max_iterations):
             print(f"\n--- Orchestrator: Iteration {iteration + 1} ---")
 
             current_prompt = self.prompt_engine.build_prompt(
                 user_question=user_question, 
-                context_str=current_context,
+                context_str=current_context, # current_context 现在可能包含RAG的输出
                 chat_history=chat_history 
             )
+            # 在第一次迭代后，清除 current_context，因为后续上下文将通过 chat_history 传递
+            if iteration == 0:
+                 current_context = "" 
+
             print(f"Orchestrator: Prompt to LLM (first 500 chars):\n{current_prompt[:500]}..." + ("" if len(current_prompt) <= 500 else " [TRUNCATED]"))
 
             try:
@@ -182,6 +222,7 @@ class Orchestrator:
 if __name__ == '__main__':
     from .tool_manager import ListDirectoryTool, ReadFileContentTool, QueryVectorDBTool
     from .embedding_service import EmbeddingService
+    from .rag_service import RAGService
 
     print("Orchestrator __main__ block starting...")
 
@@ -223,17 +264,27 @@ if __name__ == '__main__':
 
     print(f"Initialized tools: {[tool.name for tool in available_tools]}")
 
-    # 3. Setup PromptEngine
+    # 3. Setup RAGService (if needed by Orchestrator)
+    rag_service_instance = None
+    try:
+        print("Initializing RAGService...")
+        rag_service_instance = RAGService() # RAGService creates its own EmbeddingService internally for now
+        print("RAGService initialized.")
+    except Exception as e:
+        print(f"Error initializing RAGService: {e}. Orchestrator will run without RAG pre-processing.")
+    # --- End RAGService Setup ---
+
+    # 4. Setup PromptEngine
     print("Initializing PromptEngine...")
     prompt_engine_instance = PromptEngine(tools=available_tools)
     print("Initialized PromptEngine.")
 
-    # 4. Setup Orchestrator
+    # 5. Setup Orchestrator
     print("Initializing Orchestrator...")
     orchestrator_instance = Orchestrator(
         tools=available_tools, 
-        prompt_engine=prompt_engine_instance
-        # OpenAI client will be created internally by Orchestrator by default
+        prompt_engine=prompt_engine_instance,
+        rag_service=rag_service_instance
     )
     print("Orchestrator initialized.")
 
@@ -251,10 +302,13 @@ if __name__ == '__main__':
     # user_query = f"请列出目录 '{test_dir}' 下的文件，然后读取文件 '{test_file}' 的内容。"
     
     # Example 2: Query Vector DB (if available and indexed)
-    if embedding_service_instance and 'query_vector_db' in orchestrator_instance.tools:
-        # 确保你的向量数据库已经索引了一些内容，并且'main.py'这个文件/元数据存在
-        # user_query = "从向量数据库中查找关于 'main.py' 的信息，并给我总结。"
-        # user_query = "Is there a file named 'main.py' in the vector database? Query for it using its source path."
+    if rag_service_instance:
+        # Example query that might benefit from RAG + Tools
+        user_query = "请根据我的代码库解释一下'main.py'文件是做什么的，并列出当前项目根目录下的所有文件。"
+        # To make RAG effective for this, ensure 'main.py' or relevant content is indexed.
+        # You might need to uncomment and run embedding_service_instance.index_codebase in the EmbeddingService setup part above.
+        print("--- RAG Service is active. Using a query that might leverage it. ---")
+    elif embedding_service_instance and 'query_vector_db' in orchestrator_instance.tools:
         user_query = "Search the vector database for documents related to 'test_file.txt' or 'orchestrator'. Then list the contents of the current directory."
         # 注意: 为了让这个查询有效, 你需要确保运行了 index_codebase, 并且 test_file.txt 或类似内容被索引了。
         # 上面的 embedding_service_instance.index_codebase(test_codebase_path) 需要被取消注释并正确配置路径。
